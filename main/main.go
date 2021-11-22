@@ -41,6 +41,7 @@ func main() {
 		go func(i int) {
 			defer wg.Done()
 			args := fmt.Sprintf("geerpc req %d", i)
+			// 回复数据
 			var reply string
 			// 请求调用
 			if err := client.Call("Foo.Sum", args, &reply); err != nil {

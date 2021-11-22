@@ -11,6 +11,7 @@ import (
 	"sync"
 )
 
+// 调用结构
 type Call struct {
 	Seq           uint64
 	ServiceMethod string
@@ -20,6 +21,7 @@ type Call struct {
 	Done          chan *Call // 可以支持异步调用
 }
 
+// 调用执行函数
 func (call *Call) done() {
 	call.Done <- call
 }
@@ -136,7 +138,7 @@ func (client *Client) send(call *Call) {
 	client.sending.Lock()
 	defer client.sending.Unlock()
 
-	// register this call.
+	// 注册回调结构
 	seq, err := client.registerCall(call)
 	if err != nil {
 		call.Error = err
@@ -161,7 +163,7 @@ func (client *Client) send(call *Call) {
 	}
 }
 
-// Go invokes the function asynchronously.
+// 异步调用函数
 // It returns the Call structure representing the invocation.
 func (client *Client) Go(serviceMethod string, args, reply interface{}, done chan *Call) *Call {
 	if done == nil {
@@ -175,6 +177,7 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 		Reply:         reply,
 		Done:          done,
 	}
+	// 回调结构
 	client.send(call)
 	return call
 }
@@ -194,7 +197,8 @@ func (client *Client) Call(serviceMethod string, args, reply interface{}) error 
 */
 
 func NewClient(conn net.Conn, opt *Option) (*Client, error) {
-	// 获取数据解析实体
+
+	// 获取数据解析实体 Codec
 	f := codec.NewCodecFuncMap[opt.CodecType]
 	if f == nil {
 		err := fmt.Errorf("invalid codec type %s", opt.CodecType)
@@ -207,6 +211,7 @@ func NewClient(conn net.Conn, opt *Option) (*Client, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	// 返回解析实体的client
 	return newClientCodec(f(conn), opt), nil
 }
 
@@ -260,5 +265,7 @@ func Dial(network, address string, opts ...*Option) (client *Client, err error) 
 			_ = conn.Close()
 		}
 	}()
+
+	// 返回client
 	return NewClient(conn, opt)
 }
