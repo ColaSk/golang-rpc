@@ -60,6 +60,7 @@ func (client *Client) IsAvailable() bool {
 	return !client.shutdown && !client.closing
 }
 
+// 注册回调
 func (client *Client) registerCall(call *Call) (uint64, error) {
 	client.mu.Lock()
 	defer client.mu.Unlock()

@@ -49,7 +49,7 @@ func (c *GobCodec) Close() error {
 // ? 确保接口被实现常用的方式
 var _ Codec = (*GobCodec)(nil)
 
-// 返回gob实体指针
+// 返回gob实体指针  gob编码处理机制
 func NewGobCodec(conn io.ReadWriteCloser) Codec {
 	buf := bufio.NewWriter(conn)
 	return &GobCodec{
