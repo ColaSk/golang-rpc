@@ -1,6 +1,7 @@
 package geerpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // 调用结构
@@ -185,9 +187,17 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 
 // Call invokes the named function, waits for it to complete,
 // and returns its error status.
-func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
-	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+func (client *Client) Call(ctx context.Context, serviceMethod string, args, reply interface{}) error {
+	// ctx 控制权丢给用户更灵活
+	call := client.Go(serviceMethod, args, reply, make(chan *Call, 1))
+	// 添加超超时处理
+	select {
+	case <-ctx.Done():
+		client.removeCall(call.Seq)
+		return errors.New("rpc client: call failed: " + ctx.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }
 
 /*
@@ -250,23 +260,47 @@ func parseOptions(opts ...*Option) (*Option, error) {
 
 // 便于用户传入服务端地址，创建 Client 实例
 func Dial(network, address string, opts ...*Option) (client *Client, err error) {
-	// 解析操作
+	return dialTimeout(NewClient, network, address, opts...)
+}
+
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+// 定义函数变量
+type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
+
+// 定义客户端超时函数
+func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
 	}
-	// 建立网络链接
-	conn, err := net.Dial(network, address)
+	// 超时方法
+	conn, err := net.DialTimeout(network, address, opt.ConnectTimeout)
 	if err != nil {
 		return nil, err
 	}
 	// close the connection if client is nil
 	defer func() {
-		if client == nil {
+		if err != nil {
 			_ = conn.Close()
 		}
 	}()
-
-	// 返回client
-	return NewClient(conn, opt)
+	ch := make(chan clientResult)
+	go func() {
+		client, err := f(conn, opt)
+		ch <- clientResult{client: client, err: err}
+	}()
+	if opt.ConnectTimeout == 0 {
+		result := <-ch
+		return result.client, result.err
+	}
+	select {
+	case <-time.After(opt.ConnectTimeout):
+		return nil, fmt.Errorf("rpc client: connect timeout: expect within %s", opt.ConnectTimeout)
+	case result := <-ch:
+		return result.client, result.err
+	}
 }
