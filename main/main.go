@@ -1,8 +1,8 @@
-package main
+package main_test
 
 import (
 	"context"
-	"geerpc"
+	"gmrpc"
 	"log"
 	"net"
 	"sync"
@@ -22,7 +22,7 @@ func startServer(addr chan string) {
 	var foo Foo
 
 	// 注册服务
-	if err := geerpc.Register(&foo); err != nil {
+	if err := gmrpc.Register(&foo); err != nil {
 		log.Fatal("register error:", err)
 	}
 	// pick a free port
@@ -32,14 +32,14 @@ func startServer(addr chan string) {
 	}
 	log.Println("start rpc server on", l.Addr())
 	addr <- l.Addr().String()
-	geerpc.Accept(l)
+	gmrpc.Accept(l)
 }
 
 func main() {
 	log.SetFlags(0)
 	addr := make(chan string)
 	go startServer(addr)
-	client, _ := geerpc.Dial("tcp", <-addr)
+	client, _ := gmrpc.Dial("tcp", <-addr)
 	defer func() { _ = client.Close() }()
 
 	time.Sleep(time.Second)

@@ -1,4 +1,4 @@
-package geerpc
+package gmrpc
 
 import (
 	"go/ast"

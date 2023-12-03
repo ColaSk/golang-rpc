@@ -1,3 +1,3 @@
-module geerpc
+module gmrpc  // go my rpc
 
-go 1.17
+go 1.18

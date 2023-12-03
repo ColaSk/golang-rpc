@@ -4,14 +4,14 @@ import "io"
 
 // 定义头部
 type Header struct {
-	ServiceMethod string // "Service.Method"
+	ServiceMethod string // 调用包方法名称 Service.Method
 	Seq           uint64 // 请求序列号
 	Error         string // 错误信息
 }
 
 // 对消息体编解码接口
 type Codec interface {
-	io.Closer
+	io.Closer // 继承关闭资源的接口
 	ReadHeader(*Header) error
 	ReadBody(interface{}) error
 	Write(*Header, interface{}) error
@@ -33,4 +33,5 @@ var NewCodecFuncMap map[Type]NewCodecFunc
 func init() {
 	NewCodecFuncMap = make(map[Type]NewCodecFunc)
 	NewCodecFuncMap[GobType] = NewGobCodec
+	NewCodecFuncMap[JsonType] = NewJsonCodec
 }

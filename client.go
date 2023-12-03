@@ -1,11 +1,11 @@
-package geerpc
+package gmrpc
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"geerpc/codec"
+	"gmrpc/codec"
 	"io"
 	"log"
 	"net"
