@@ -2,12 +2,14 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"gmrpc/codec"
+	"gmrpc/service"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -22,11 +24,50 @@ type request struct {
 	h      *codec.Header
 	argv   reflect.Value // 反射
 	replyv reflect.Value // 反射
+	mtype  *service.MethodType
+	svc    *service.Service
 }
 
-type Server struct{}
+type Server struct {
+	serviceMap sync.Map
+}
 
 var invalidRequest = struct{}{}
+
+func (server *Server) Register(rcvr interface{}) error {
+	s := service.NewService(rcvr)
+
+	if _, loaded := server.serviceMap.LoadOrStore(s.Name, s); loaded {
+		return errors.New("rpc: service already defined: " + s.Name)
+	}
+	return nil
+}
+
+func (server *Server) findService(serviceMethod string) (svc *service.Service, mtype *service.MethodType, err error) {
+	// 获取分隔符位置
+	dot := strings.LastIndex(serviceMethod, ".")
+	if dot < 0 {
+		err = errors.New("rpc server: service/method request ill-formed: " + serviceMethod)
+		return
+	}
+
+	// 获取服务名称与方法名称
+	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
+
+	// 获取服务
+	svci, ok := server.serviceMap.Load(serviceName)
+	if !ok {
+		err = errors.New("rpc server: can't find service " + serviceName)
+		return
+	}
+	// 转化服务与方法
+	svc = svci.(*service.Service)
+	mtype = svc.Method[methodName]
+	if mtype == nil {
+		err = errors.New("rpc server: can't find method " + methodName)
+	}
+	return
+}
 
 func (server *Server) Accept(lis net.Listener) {
 	for {
@@ -106,13 +147,27 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 		return nil, err
 	}
 
+	// 创建请求
 	req := &request{h: header}
-	req.argv = reflect.New(reflect.TypeOf(""))
+	req.svc, req.mtype, err = server.findService(header.ServiceMethod)
+	if err != nil {
+		return nil, err
+	}
+	req.argv = req.mtype.NewArgv()
+	req.replyv = req.mtype.NewReplyv()
+
+	var argvi any
+	if req.argv.Type().Kind() != reflect.Ptr {
+		argvi = req.argv.Addr().Interface()
+	} else {
+		argvi = req.argv.Interface()
+	}
 
 	// 解析参数
-	err = cc.ReadBody(req.argv.Interface())
+	err = cc.ReadBody(argvi)
 	if err != nil {
 		log.Println("rpc server read argv err:", err)
+		return req, err
 	}
 
 	return req, nil
@@ -121,8 +176,12 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 
 func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Println(req.h, req.argv.Elem())
-	req.replyv = reflect.ValueOf(fmt.Sprintf("geerpc resp %d", req.h.Seq))
+	err := req.svc.Call(req.mtype, req.argv, req.replyv)
+	if err != nil {
+		req.h.Error = err.Error()
+		server.sendResponse(cc, req.h, invalidRequest, sending)
+		return
+	}
 	server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
 }
 
@@ -147,6 +206,17 @@ var DefaultOption = &Option{
 var DefaultJsonOption = &Option{
 	MagicNumber: MagicNumber,
 	CodecType:   codec.JsonType,
+}
+
+func Register(rcvr interface{}, server ...*Server) error {
+	var ser *Server
+	if len(server) >= 1 {
+		ser = server[0]
+	} else {
+		ser = DefaultServer
+	}
+
+	return ser.Register(rcvr)
 }
 
 func Accept(lis net.Listener) {
