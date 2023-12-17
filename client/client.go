@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,10 +180,18 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 	return call
 }
 
-func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
+func (client *Client) Call(ctx context.Context, serviceMethod string, args, reply interface{}) error {
 	// 同步调用
-	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+	call := client.Go(serviceMethod, args, reply, make(chan *Call, 1))
+
+	// 上下文控制超时
+	select {
+	case <-ctx.Done():
+		client.removeCall(call.Seq)
+		return errors.New("rpc client: call failed: " + ctx.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }
 
 func NewClient(conn net.Conn, opt *server.Option) (*Client, error) {
@@ -219,10 +228,6 @@ func newClientCodec(cc codec.Codec, opt *server.Option) *Client {
 	}
 	go client.receive()
 	return client
-}
-
-func Dial(network string, address string, opts ...*server.Option) (client *Client, err error) {
-	return dialTimeout(NewClient, network, address, opts...)
 }
 
 type clientResult struct {
@@ -275,4 +280,8 @@ func dialTimeout(f newClientFunc, network string, address string, opts ...*serve
 	case result := <-clientResCh:
 		return result.client, result.err
 	}
+}
+
+func Dial(network string, address string, opts ...*server.Option) (*Client, error) {
+	return dialTimeout(NewClient, network, address, opts...)
 }

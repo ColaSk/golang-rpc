@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gmrpc/codec"
 	"gmrpc/service"
 	"io"
@@ -102,10 +103,10 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		return
 	}
 
-	server.ServeCodec(_func(conn))
+	server.ServeCodec(_func(conn), opt.HandleTimeout)
 }
 
-func (server *Server) ServeCodec(cc codec.Codec) {
+func (server *Server) ServeCodec(cc codec.Codec, timeout time.Duration) {
 	// 1. 读取请求
 	// 2. 处理请求
 	// 3. 回复请求
@@ -124,7 +125,7 @@ func (server *Server) ServeCodec(cc codec.Codec) {
 			continue
 		}
 		wg.Add(1)
-		go server.handleRequest(cc, req, sending, wg)
+		go server.handleRequest(cc, req, sending, wg, timeout)
 	}
 	wg.Wait()
 	cc.Close()
@@ -177,15 +178,37 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 
 }
 
-func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup, timeout time.Duration) {
 	defer wg.Done()
-	err := req.svc.Call(req.mtype, req.argv, req.replyv)
-	if err != nil {
-		req.h.Error = err.Error()
-		server.sendResponse(cc, req.h, invalidRequest, sending)
+	called := make(chan struct{})
+	sent := make(chan struct{})
+
+	go func() {
+		err := req.svc.Call(req.mtype, req.argv, req.replyv)
+		called <- struct{}{}
+		if err != nil {
+			req.h.Error = err.Error()
+			server.sendResponse(cc, req.h, invalidRequest, sending)
+			sent <- struct{}{}
+			return
+		}
+		server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
+		sent <- struct{}{}
+	}()
+
+	if timeout == 0 {
+		<-called
+		<-sent
 		return
 	}
-	server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
+
+	select {
+	case <-time.After(timeout):
+		req.h.Error = fmt.Sprintf("rpc server: request handle timeout: expect within %s", timeout)
+		server.sendResponse(cc, req.h, invalidRequest, sending)
+	case <-called:
+		<-sent
+	}
 }
 
 func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body interface{}, sending *sync.Mutex) {
