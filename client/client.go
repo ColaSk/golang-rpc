@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // rpc调用结构体
@@ -221,24 +222,57 @@ func newClientCodec(cc codec.Codec, opt *server.Option) *Client {
 }
 
 func Dial(network string, address string, opts ...*server.Option) (client *Client, err error) {
+	return dialTimeout(NewClient, network, address, opts...)
+}
+
+type clientResult struct {
+	client *Client
+	err    error
+}
+
+type newClientFunc func(conn net.Conn, opt *server.Option) (client *Client, err error)
+
+func dialTimeout(f newClientFunc, network string, address string, opts ...*server.Option) (client *Client, err error) {
+	// 超时处理
+
 	// 创建opt
 	var opt *server.Option = server.DefaultOption
 	if len(opts) >= 1 && opts[0] != nil {
 		opt = opts[0]
 	}
 
-	// 创建链接
-	conn, err := net.Dial(network, address)
+	// 创建链接 连接超时处理
+	// conn, err := net.Dial(network, address)
+	conn, err := net.DialTimeout(network, address, opt.ConnectTimeout)
 
 	if err != nil {
 		return nil, err
 	}
 
+	// 关闭连接
 	defer func() {
-		if client == nil {
+		if err != nil {
 			_ = conn.Close()
 		}
 	}()
 
-	return NewClient(conn, opt)
+	clientResCh := make(chan clientResult)
+
+	go func() {
+		client, err := f(conn, opt)
+		clientresult := clientResult{client: client, err: err}
+		clientResCh <- clientresult
+	}()
+
+	if opt.ConnectTimeout == 0 {
+		clientRes := <-clientResCh
+		return clientRes.client, clientRes.err
+	}
+
+	select {
+	case <-time.After(opt.ConnectTimeout):
+		return nil, fmt.Errorf("rpc client: connect timeout: expect within %s", opt.ConnectTimeout)
+	case result := <-clientResCh:
+		return result.client, result.err
+	}
 }

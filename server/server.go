@@ -11,13 +11,16 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const MagicNumber = 0x3bef5c
 
 type Option struct {
-	CodecType   codec.Type // 解码类型
-	MagicNumber int
+	CodecType      codec.Type // 解码类型
+	MagicNumber    int
+	ConnectTimeout time.Duration // int64  default 10 连接超时
+	HandleTimeout  time.Duration // int64  default 0  处理超时
 }
 
 type request struct {
@@ -200,12 +203,16 @@ func NewServer() *Server {
 
 var DefaultServer *Server = NewServer()
 var DefaultOption = &Option{
-	MagicNumber: MagicNumber,
-	CodecType:   codec.GobType,
+	MagicNumber:    MagicNumber,
+	CodecType:      codec.GobType,
+	ConnectTimeout: time.Second * 10,
+	HandleTimeout:  0,
 }
 var DefaultJsonOption = &Option{
-	MagicNumber: MagicNumber,
-	CodecType:   codec.JsonType,
+	MagicNumber:    MagicNumber,
+	CodecType:      codec.JsonType,
+	ConnectTimeout: time.Second * 10,
+	HandleTimeout:  0,
 }
 
 func Register(rcvr interface{}, server ...*Server) error {
